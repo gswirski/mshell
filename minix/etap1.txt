@@ -1,0 +1,64 @@
+Implementacja shella - etap 1.
+
+W pierwszym etapie dla każdej kolejnej linii na wejściu wystarczy wykonać tylko pierwszą z podanych komend. W etapie 1 zakładamy że wejście jest z konsoli/terminala. 
+
+Wartości używanych poniżej makr są zdefiniowane w pliku "include/config.h".
+
+Główna pętla shella:
+	1. Wypisz prompt na STDOUT.
+	2. Wczytaj linię z STDIN. 
+	3. Sparsuj komendy z linii (wskazane jest użycie dostarczonego parsera).
+	4.1. Jeśli parsowanie zakończyło się sukcesem, wykonaj pierwszą ze sparsowanych komend jako program w procesie potomnym jeśli komenda jest niepusta. Proces shella powinien poczekać na zakończenie procesu potomnego. Obsługa błędów:
+		- Jeśli program zdefiniowany w komendzie nie istnieje, proces potomny powinien wypisać na STDERR "[nazwa programu]: no such file or directory\n".
+		- Jeśli program zdefiniowany w komendzie istnieje ale nie można go uruchomić z powodu braku praw do uruchomienia dla bieżącego użytkownika, proces potomny powinien wypisać na STDERR "[nazwa programu]: permission denied\n".
+		- W pozostałych przypadkach gdy nie uda się uruchomić programu, proces potomny powinien wypisać na STDERR "[nazwa programu]: exec error\n".
+		- W przypadku powyższych niepowodzeń proces potomny powinien zakończyć działanie niepowodzeniem zwracając wartość makra EXEC_FAILURE (np. 'exit(EXEC_FAILURE)').
+	4.2. Jeśli parsowanie zakończyło się błędem, należy wypisać na STDERR informację o błędzie (wartość makra SYNTAX_ERROR_STR) zakończoną znakiem nowej linii '\n'.
+Główna pętla powinna się zakończyć gdy na STDIN zaobserwujemy EOF.
+
+
+Założenia tymczasowe:
+- Linie przychodzą w całości (jeden read z STDIN zwraca jedną linię).
+
+
+Wymagania:
+- Długość linii nie powinna przekraczać wartości makra MAX_LINE_LENGTH. Linie dłuższe niż ta wartość powinny być traktowane jako syntax error i nie powinny być przekazywane do parsera.
+- Do wczytywania ze standartowego wejścia wolno używać jedynie read.
+- Przy poszukiwaniu programu do wykonania należy uwzględnić katalogi ze zmiennej środowiskowej PATH (patrz 'execvp').
+- Domyślny prompt jest zadany przez makro PROMPT_STR.
+
+
+Syscall checklist (następujące syscalle powinny się pojawić w kodzie): 
+	read(write), fork, exec, wait/waitpid
+
+Dodatkowo:
+- W pliku 'utils.c' zaimplementowane są proste funkcje, które mogą się przydać do debugowania. 
+- Należy się spodziewać że zdefiniowane pliki nagłówkowe oraz źródła, poza 'mshell.c' mogą zostać rozszerzone/zmienione w kolejnych etapach. Dlatego własny kod najlepiej umieszczać w 'mshell.c' lub stworzonych przez siebie plikach.
+
+
+Przykład sesji (sesję kończymy CTRL-D który powoduje pojawienie się EOF na STDIN):
+./mshell
+$ ls /home
+ast bin dude
+> sleep 3
+> ls -las /home
+total 6
+total 40
+8 drwxrwxrwx   5 bin   bin        320 Oct  5 15:13 .
+8 drwxr-xr-x  17 root  operator  1408 Oct  5 13:39 ..
+8 drwxr-xr-x   2 ast   operator   320 Feb 15  2013 ast
+8 drwxr-xr-x   2 bin   operator   320 Feb 15  2013 bin
+8 drwxr-xr-x   4 dude  dude      1024 Oct 12 19:37 dude
+>
+$ cat /etc/version 
+3.2.1, SVN revision , generated Fri Feb 15 11:34:15 GMT 2013
+$ cat /etc/version /etc/version 
+3.2.1, SVN revision , generated Fri Feb 15 11:34:15 GMT 2013
+3.2.1, SVN revision , generated Fri Feb 15 11:34:15 GMT 2013
+$ iamthewalrus
+iamthewalrus: no such file or directory
+$ /etc/passwd
+/etc/passwd: permission denied
+$ /etc
+/etc: exec error
+> CTRL-D
