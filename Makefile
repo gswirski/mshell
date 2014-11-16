@@ -3,13 +3,13 @@ CFLAGS=$(INC)
 
 PARSERDIR=input_parse
 
-SRCS=utils.c mshell.c
+SRCS=utils.c mshell.c reader.c
 OBJS:=$(SRCS:.c=.o)
 
-all: mshell 
+all: mshell
 
 mshell: $(OBJS) siparse.a
-	cc $(CFLAGS) $(OBJS) siparse.a -o $@ 
+	cc $(CFLAGS) $(OBJS) siparse.a -o $@
 
 %.o: %.c
 	cc $(CFLAGS) -c $<
