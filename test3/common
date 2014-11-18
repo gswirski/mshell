@@ -1,0 +1,6 @@
+INPUT_DIR=input
+OUTPUT_DIR=output
+EXPECTED_DIR=expected
+EXEC_DIR=exec
+BIN=bin
+	

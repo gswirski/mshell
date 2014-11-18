@@ -10,6 +10,7 @@
 #include "siparse.h"
 #include "utils.h"
 #include "reader.h"
+#include "builtins.h"
 
 static struct stat stdin_stat;
 extern char **environ;
@@ -45,26 +46,37 @@ int main(int argc, char *argv[]) {
     ln = parseline(input);
     cmd = pickfirstcommand(ln);
 
-    if (!cmd || !cmd->argv || !*(cmd->argv)) {
+    if (!cmd || !cmd->argv || !cmd->argv[0]) {
+      continue;
+    }
+
+    builtin_ptr builtin = builtin_lookup(cmd->argv[0]);
+    if (builtin) {
+      builtin(cmd->argv);
       continue;
     }
 
     pid = fork();
     if (pid == 0) {
-      execvp(*(cmd->argv), cmd->argv);
+      execvp(cmd->argv[0], cmd->argv);
       exit(errno);
     } else {
       wait(&status);
-      switch (WEXITSTATUS(status)) {
-      case EACCES:
-        fprintf(stderr, "%s: permission denied\n", *(cmd->argv));
-        break;
-      case ENOENT:
-        fprintf(stderr, "%s: no such file or directory\n", *(cmd->argv));
-        break;
-      case ENOEXEC:
-        fprintf(stderr, "%s: exec error\n", *(cmd->argv));
-        break;
+
+      if (WEXITSTATUS(status)) {
+        fprintf(stderr, "%s: ", cmd->argv[0]);
+
+        switch (WEXITSTATUS(status)) {
+        case EACCES:
+          fprintf(stderr, "permission denied\n");
+          break;
+        case ENOENT:
+          fprintf(stderr, "no such file or directory\n");
+          break;
+        case ENOEXEC:
+          fprintf(stderr, "exec error\n");
+          break;
+        }
       }
     }
   }

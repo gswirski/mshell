@@ -1,0 +1,13 @@
+
+cat /dev/null > $outf
+
+echo "# builtin kill test 1" > $inf
+
+$base_dir/$BIN/catcher >> $outf &
+$base_dir/$BIN/catcher >> $outf &
+
+ps | grep catcher| grep -v "grep" |  sed -n -e 's/^[ ]*\([0-9][0-9]*\).*/lkill -10 \1 /p' > $inf
+
+
+$shell < $inf 2> $errf >> $outf
+
