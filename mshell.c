@@ -1,9 +1,11 @@
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <sys/types.h>
 #include <sys/wait.h>
 
 #include "config.h"
@@ -22,6 +24,49 @@ void print_prompt() {
   }
 }
 
+void replace_fd(int a, int b) {
+  close(a);
+  dup2(b, a);
+  close(b);
+}
+
+int setup_file_descriptors(redirection *redirs[]) {
+  int fd;
+  redirection *redir;
+
+  for (int i = 0; redirs[i]; i++) {
+    redir = redirs[i];
+
+    if (IS_RIN(redir->flags)) {
+      fd = open(redir->filename, O_RDONLY);
+
+      if (fd == -1) {
+        fprintf(stderr, "%s: couldn't open file\n", redir->filename);
+        return -1;
+      }
+
+      replace_fd(STDIN_FILENO, fd);
+    } else {
+      int mode = S_IRUSR|S_IWUSR|S_IRGRP|S_IROTH;
+
+      if (IS_ROUT(redir->flags)) {
+        fd = open(redir->filename, O_WRONLY|O_TRUNC|O_CREAT, mode);
+      } else {
+        fd = open(redir->filename, O_WRONLY|O_APPEND|O_CREAT, mode);
+      }
+
+      if (fd == -1) {
+        fprintf(stderr, "%s: couldn't open file\n", redir->filename);
+        return -1;
+      }
+
+      replace_fd(STDOUT_FILENO, fd);
+    }
+  }
+
+  return 0;
+}
+
 int main(int argc, char *argv[]) {
   char * input;
   line * ln;
@@ -31,6 +76,7 @@ int main(int argc, char *argv[]) {
 
   fstat(STDIN_FILENO, &stdin_stat);
 
+  repl:
   while (1) {
     print_prompt();
 
@@ -58,6 +104,10 @@ int main(int argc, char *argv[]) {
 
     pid = fork();
     if (pid == 0) {
+      if (setup_file_descriptors(cmd->redirs) == -1) {
+        exit(0); // probably should fail with errno
+        // problem with error handling later
+      }
       execvp(cmd->argv[0], cmd->argv);
       exit(errno);
     } else {

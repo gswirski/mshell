@@ -4,7 +4,9 @@
 #include <stdlib.h>
 #include <unistd.h>
 
-int 
+#define OPEN_MAX 256
+
+int
 main(int argc, char* argv[])
 {
 	int n, fds;
