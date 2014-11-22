@@ -25,6 +25,7 @@ void print_prompt() {
 }
 
 void replace_fd(int a, int b) {
+  if (a == b) return;
   close(a);
   dup2(b, a);
   close(b);
@@ -67,6 +68,73 @@ int setup_file_descriptors(redirection *redirs[]) {
   return 0;
 }
 
+void handle_command(command *cmd) {
+  printf("cmd: %s\n", cmd->argv[0]);
+
+}
+
+struct pid_queue {
+  pid_t pid;
+  struct pid_queue *next;
+};
+
+void handle_pipeline(command **cmd) {
+  pid_t pid;
+  int pipefd[2], nxt_pipefd[2];
+  struct pid_queue *Q = NULL;
+  struct pid_queue *X;
+  pipefd[0] = pipefd[1] = nxt_pipefd[0] = nxt_pipefd[1] = -1;
+
+  printf("pipeline:\n");
+  while (*cmd) {
+    printf("  cmd: %s\n", (*cmd)->argv[0]);
+    if (*(cmd+1)) {
+      pipe(nxt_pipefd);
+    }
+
+    pid = fork();
+    if (pid == 0) {
+      if (pipefd[0] != -1) {
+        replace_fd(STDIN_FILENO, pipefd[0]);
+        close(pipefd[1]);
+      }
+      if (nxt_pipefd[1] != -1) {
+        close(nxt_pipefd[0]);
+        replace_fd(STDOUT_FILENO, nxt_pipefd[1]);
+      }
+
+      execvp((*cmd)->argv[0], (*cmd)->argv);
+      exit(errno);
+    }
+
+    X = (struct pid_queue *)malloc(sizeof(struct pid_queue));
+    X->pid = pid;
+    X->next = Q;
+    Q = X;
+
+    if (pipefd[0] != -1) {
+      close(pipefd[0]);
+      close(pipefd[1]);
+    }
+    pipefd[0] = nxt_pipefd[0];
+    pipefd[1] = nxt_pipefd[1];
+    nxt_pipefd[0] = nxt_pipefd[1] = -1;
+
+    cmd++;
+  }
+
+  if (pipefd[0] != -1) {
+    close(pipefd[0]);
+    close(pipefd[1]);
+  }
+
+  int status;
+  while (Q) {
+    waitpid(Q->pid, &status, 0);
+    Q = Q->next;
+  }
+}
+
 int main(int argc, char *argv[]) {
   char * input;
   line * ln;
@@ -76,7 +144,6 @@ int main(int argc, char *argv[]) {
 
   fstat(STDIN_FILENO, &stdin_stat);
 
-  repl:
   while (1) {
     print_prompt();
 
@@ -90,6 +157,14 @@ int main(int argc, char *argv[]) {
     }
 
     ln = parseline(input);
+
+    pipeline *pipln = ln->pipelines;
+    while (*pipln) {
+      handle_pipeline(*pipln);
+      pipln++;
+    }
+    exit(0);
+
     cmd = pickfirstcommand(ln);
 
     if (!cmd || !cmd->argv || !cmd->argv[0]) {
