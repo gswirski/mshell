@@ -1,8 +1,0 @@
-cat: test.e4.1.A: No such file or directory
-cat: cat: test.e4.1.B: No such file or directory
-cat: rm: test.e4.1.A: No such file or directory
-rm: test.e4.1.B: No such file or directory
-rm: test.e4.1.C: No such file or directory
-rm: test.e4.1.D: No such file or directory
-rm: test.e4.1.E: No such file or directory
-rm: 

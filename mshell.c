@@ -12,10 +12,17 @@
 #include "siparse.h"
 #include "utils.h"
 #include "reader.h"
+#include "pipe.h"
 #include "builtins.h"
 
+#define SWAP(a, b) __typeof(a) c = b; b = a; a = c
+
 static struct stat stdin_stat;
-extern char **environ;
+
+struct pid_queue {
+  pid_t pid;
+  struct pid_queue *next;
+};
 
 void print_prompt() {
   if (S_ISCHR(stdin_stat.st_mode)) {
@@ -31,7 +38,16 @@ void replace_fd(int a, int b) {
   close(b);
 }
 
-int setup_file_descriptors(redirection *redirs[]) {
+int handle_error(char *filename) {
+  if (errno == EACCES) {
+    fprintf(stderr, "%s: permission denied\n", filename);
+  } else {
+    fprintf(stderr, "%s: no such file or directory\n", filename);
+  }
+  return -1;
+}
+
+int setup_cmd_redirs(redirection *redirs[]) {
   int fd;
   redirection *redir;
 
@@ -42,8 +58,7 @@ int setup_file_descriptors(redirection *redirs[]) {
       fd = open(redir->filename, O_RDONLY);
 
       if (fd == -1) {
-        fprintf(stderr, "%s: couldn't open file\n", redir->filename);
-        return -1;
+        return handle_error(redir->filename);
       }
 
       replace_fd(STDIN_FILENO, fd);
@@ -57,8 +72,7 @@ int setup_file_descriptors(redirection *redirs[]) {
       }
 
       if (fd == -1) {
-        fprintf(stderr, "%s: couldn't open file\n", redir->filename);
-        return -1;
+        return handle_error(redir->filename);
       }
 
       replace_fd(STDOUT_FILENO, fd);
@@ -68,42 +82,59 @@ int setup_file_descriptors(redirection *redirs[]) {
   return 0;
 }
 
-void handle_command(command *cmd) {
-  printf("cmd: %s\n", cmd->argv[0]);
-
+int setup_redirs(struct pipe *lft, command *cmd, struct pipe *rgt) {
+  close_write(lft);
+  close_read(rgt);
+  replace_fd(STDIN_FILENO, lft->pipefd[0]);
+  replace_fd(STDOUT_FILENO, rgt->pipefd[1]);
+  return setup_cmd_redirs(cmd->redirs);
 }
-
-struct pid_queue {
-  pid_t pid;
-  struct pid_queue *next;
-};
 
 void handle_pipeline(command **cmd) {
   pid_t pid;
-  int pipefd[2], nxt_pipefd[2];
-  struct pid_queue *Q = NULL;
-  struct pid_queue *X;
-  pipefd[0] = pipefd[1] = nxt_pipefd[0] = nxt_pipefd[1] = -1;
+  struct pipe *lft, *rgt;
+  struct pid_queue *X, *Q = NULL;
 
-  printf("pipeline:\n");
+  if (!(*cmd) || !(*cmd)->argv || !(*cmd)->argv[0]) {
+    return;
+  }
+
+  if (!(*(cmd+1))) {
+    builtin_ptr builtin = builtin_lookup((*cmd)->argv[0]);
+    if (builtin) {
+      builtin((*cmd)->argv);
+      return;
+    }
+  }
+
+  lft = create_pipe();
+  rgt = create_pipe();
+
   while (*cmd) {
-    printf("  cmd: %s\n", (*cmd)->argv[0]);
     if (*(cmd+1)) {
-      pipe(nxt_pipefd);
+      init_new_pipe(rgt);
     }
 
     pid = fork();
     if (pid == 0) {
-      if (pipefd[0] != -1) {
-        replace_fd(STDIN_FILENO, pipefd[0]);
-        close(pipefd[1]);
+      if (setup_redirs(lft, *cmd, rgt) == -1) {
+        exit(1);
       }
-      if (nxt_pipefd[1] != -1) {
-        close(nxt_pipefd[0]);
-        replace_fd(STDOUT_FILENO, nxt_pipefd[1]);
-      }
-
       execvp((*cmd)->argv[0], (*cmd)->argv);
+
+      fprintf(stderr, "%s: ", (*cmd)->argv[0]);
+
+      switch (errno) {
+      case EACCES:
+        fprintf(stderr, "permission denied\n");
+        break;
+      case ENOENT:
+        fprintf(stderr, "no such file or directory\n");
+        break;
+      case ENOEXEC:
+        fprintf(stderr, "exec error\n");
+        break;
+      }
       exit(errno);
     }
 
@@ -112,26 +143,27 @@ void handle_pipeline(command **cmd) {
     X->next = Q;
     Q = X;
 
-    if (pipefd[0] != -1) {
-      close(pipefd[0]);
-      close(pipefd[1]);
-    }
-    pipefd[0] = nxt_pipefd[0];
-    pipefd[1] = nxt_pipefd[1];
-    nxt_pipefd[0] = nxt_pipefd[1] = -1;
+
+    close_pipe(lft);
+    SWAP(lft, rgt);
+    init_default_pipe(rgt);
 
     cmd++;
   }
 
-  if (pipefd[0] != -1) {
-    close(pipefd[0]);
-    close(pipefd[1]);
-  }
+  close_pipe(lft);
+  free(lft);
+
+  close_pipe(rgt);
+  free(rgt);
 
   int status;
   while (Q) {
     waitpid(Q->pid, &status, 0);
+
+    X = Q;
     Q = Q->next;
+    free(X);
   }
 }
 
@@ -162,47 +194,6 @@ int main(int argc, char *argv[]) {
     while (*pipln) {
       handle_pipeline(*pipln);
       pipln++;
-    }
-    exit(0);
-
-    cmd = pickfirstcommand(ln);
-
-    if (!cmd || !cmd->argv || !cmd->argv[0]) {
-      continue;
-    }
-
-    builtin_ptr builtin = builtin_lookup(cmd->argv[0]);
-    if (builtin) {
-      builtin(cmd->argv);
-      continue;
-    }
-
-    pid = fork();
-    if (pid == 0) {
-      if (setup_file_descriptors(cmd->redirs) == -1) {
-        exit(0); // probably should fail with errno
-        // problem with error handling later
-      }
-      execvp(cmd->argv[0], cmd->argv);
-      exit(errno);
-    } else {
-      wait(&status);
-
-      if (WEXITSTATUS(status)) {
-        fprintf(stderr, "%s: ", cmd->argv[0]);
-
-        switch (WEXITSTATUS(status)) {
-        case EACCES:
-          fprintf(stderr, "permission denied\n");
-          break;
-        case ENOENT:
-          fprintf(stderr, "no such file or directory\n");
-          break;
-        case ENOEXEC:
-          fprintf(stderr, "exec error\n");
-          break;
-        }
-      }
     }
   }
 
