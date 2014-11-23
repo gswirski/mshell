@@ -124,7 +124,6 @@ int setup_redirs(struct pipe *lft, command *cmd, struct pipe *rgt) {
 void handle_pipeline(command **cmd, int bg) {
   pid_t pid;
   struct pipe *lft, *rgt;
-  /*struct pid_queue *X, *Q = NULL;*/
 
   if (!(*cmd) || !(*cmd)->argv || !(*cmd)->argv[0]) {
     return;
@@ -202,6 +201,26 @@ void sigchld_handler(int signo) {
 void sigint_handler(int signo) {
 }
 
+int validate_line(line *ln) {
+  pipeline *pipln = ln->pipelines;
+  command **cmd;
+
+  while (*pipln) {
+    cmd = *pipln;
+    if (cmd && *cmd && *(cmd+1)) {
+      while (*cmd) {
+        if (!(*cmd)->argv || !(*cmd)->argv[0]) {
+          return 0;
+        }
+        cmd++;
+      }
+    }
+    pipln++;
+  }
+
+  return 1;
+}
+
 int main(int argc, char *argv[]) {
   if (signal(SIGCHLD, &sigchld_handler) == SIG_ERR) {
     exit(1);
@@ -231,6 +250,10 @@ int main(int argc, char *argv[]) {
     }
 
     ln = parseline(input);
+    if (!validate_line(ln)) {
+      fprintf(stderr, "%s\n", SYNTAX_ERROR_STR);
+      continue;
+    }
 
     pipeline *pipln = ln->pipelines;
     while (*pipln) {
