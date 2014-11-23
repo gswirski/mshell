@@ -14,20 +14,42 @@
 #include "reader.h"
 #include "pipe.h"
 #include "builtins.h"
+#include "list.h"
 
 #define SWAP(a, b) __typeof(a) c = b; b = a; a = c
 
 static struct stat stdin_stat;
 
-struct pid_queue {
-  pid_t pid;
-  struct pid_queue *next;
-};
+static volatile int fgn = 0;
+static volatile struct task_list running;
 
 void print_prompt() {
   if (S_ISCHR(stdin_stat.st_mode)) {
     printf(PROMPT_STR);
     fflush(stdout);
+  }
+}
+
+void print_exited_process(struct task *task) {
+  if (S_ISCHR(stdin_stat.st_mode)) {
+    printf("Background process %d terminated. ", task->pid);
+    if (WIFSIGNALED(task->exit_code)) {
+      printf("(killed by signal %d)\n", WTERMSIG(task->exit_code));
+    } else {
+      printf("(exited with status %d)\n", WEXITSTATUS(task->exit_code));
+    }
+  }
+}
+
+void print_exited_processes() {
+  struct task *task;
+  for (int i = 0; i < running.tasks; i++) {
+    task = &running.list[i];
+    if (task->status == 0) {
+      print_exited_process(task);
+      task_delete(&running, task);
+      i--;
+    }
   }
 }
 
@@ -38,13 +60,22 @@ void replace_fd(int a, int b) {
   close(b);
 }
 
-int handle_error(char *filename) {
-  if (errno == EACCES) {
-    fprintf(stderr, "%s: permission denied\n", filename);
-  } else {
-    fprintf(stderr, "%s: no such file or directory\n", filename);
+int handle_error(int no, char *subject) {
+  if (!no) { return 0; }
+
+  switch (errno) {
+  case EACCES:
+    fprintf(stderr, "%s: permission denied\n", subject);
+    break;
+  case ENOENT:
+    fprintf(stderr, "%s: no such file or directory\n", subject);
+    break;
+  case ENOEXEC:
+    fprintf(stderr, "%s: exec error\n", subject);
+    break;
   }
-  return -1;
+
+  return no;
 }
 
 int setup_cmd_redirs(redirection *redirs[]) {
@@ -58,7 +89,7 @@ int setup_cmd_redirs(redirection *redirs[]) {
       fd = open(redir->filename, O_RDONLY);
 
       if (fd == -1) {
-        return handle_error(redir->filename);
+        return handle_error(errno, redir->filename);
       }
 
       replace_fd(STDIN_FILENO, fd);
@@ -72,7 +103,7 @@ int setup_cmd_redirs(redirection *redirs[]) {
       }
 
       if (fd == -1) {
-        return handle_error(redir->filename);
+        return handle_error(errno, redir->filename);
       }
 
       replace_fd(STDOUT_FILENO, fd);
@@ -90,10 +121,10 @@ int setup_redirs(struct pipe *lft, command *cmd, struct pipe *rgt) {
   return setup_cmd_redirs(cmd->redirs);
 }
 
-void handle_pipeline(command **cmd) {
+void handle_pipeline(command **cmd, int bg) {
   pid_t pid;
   struct pipe *lft, *rgt;
-  struct pid_queue *X, *Q = NULL;
+  /*struct pid_queue *X, *Q = NULL;*/
 
   if (!(*cmd) || !(*cmd)->argv || !(*cmd)->argv[0]) {
     return;
@@ -115,34 +146,21 @@ void handle_pipeline(command **cmd) {
       init_new_pipe(rgt);
     }
 
+    if (!bg) {
+      fgn++;
+    }
+
     pid = fork();
     if (pid == 0) {
-      if (setup_redirs(lft, *cmd, rgt) == -1) {
+      if (setup_redirs(lft, *cmd, rgt) != 0) {
         exit(1);
       }
       execvp((*cmd)->argv[0], (*cmd)->argv);
-
-      fprintf(stderr, "%s: ", (*cmd)->argv[0]);
-
-      switch (errno) {
-      case EACCES:
-        fprintf(stderr, "permission denied\n");
-        break;
-      case ENOENT:
-        fprintf(stderr, "no such file or directory\n");
-        break;
-      case ENOEXEC:
-        fprintf(stderr, "exec error\n");
-        break;
-      }
+      handle_error(errno, (*cmd)->argv[0]);
       exit(errno);
     }
 
-    X = (struct pid_queue *)malloc(sizeof(struct pid_queue));
-    X->pid = pid;
-    X->next = Q;
-    Q = X;
-
+    task_add(&running, pid, 2-bg);
 
     close_pipe(lft);
     SWAP(lft, rgt);
@@ -151,32 +169,46 @@ void handle_pipeline(command **cmd) {
     cmd++;
   }
 
+
   close_pipe(lft);
   free(lft);
 
   close_pipe(rgt);
   free(rgt);
+}
 
+void sig_handler(int signo) {
   int status;
-  while (Q) {
-    waitpid(Q->pid, &status, 0);
-
-    X = Q;
-    Q = Q->next;
-    free(X);
+  pid_t pid;
+  struct task *chld;
+  while ((pid = waitpid(-1, &status, WNOHANG)) > 0) {
+    chld = task_find(&running, pid);
+    if (chld == NULL) {
+      continue;
+    }
+    if (chld->status == TFOREGROUND) {
+      fgn--;
+      task_delete(&running, chld);
+    } else {
+      chld->status = 0;
+      chld->exit_code = status;
+    }
   }
 }
 
 int main(int argc, char *argv[]) {
+  if (signal(SIGCHLD, &sig_handler) == SIG_ERR) {
+    exit(1);
+  }
+
   char * input;
   line * ln;
-  command *cmd;
-  pid_t pid;
   int status, err;
 
   fstat(STDIN_FILENO, &stdin_stat);
 
   while (1) {
+    print_exited_processes();
     print_prompt();
 
     input = read_line(&err, &status);
@@ -192,8 +224,12 @@ int main(int argc, char *argv[]) {
 
     pipeline *pipln = ln->pipelines;
     while (*pipln) {
-      handle_pipeline(*pipln);
+      handle_pipeline(*pipln, ln->flags);
       pipln++;
+    }
+
+    while (fgn) {
+      pause();
     }
   }
 
