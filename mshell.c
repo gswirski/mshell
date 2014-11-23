@@ -152,6 +152,10 @@ void handle_pipeline(command **cmd, int bg) {
 
     pid = fork();
     if (pid == 0) {
+      if (bg) {
+        pid_t pid = setsid();
+      }
+
       if (setup_redirs(lft, *cmd, rgt) != 0) {
         exit(1);
       }
@@ -169,7 +173,6 @@ void handle_pipeline(command **cmd, int bg) {
     cmd++;
   }
 
-
   close_pipe(lft);
   free(lft);
 
@@ -177,7 +180,7 @@ void handle_pipeline(command **cmd, int bg) {
   free(rgt);
 }
 
-void sig_handler(int signo) {
+void sigchld_handler(int signo) {
   int status;
   pid_t pid;
   struct task *chld;
@@ -196,8 +199,15 @@ void sig_handler(int signo) {
   }
 }
 
+void sigint_handler(int signo) {
+}
+
 int main(int argc, char *argv[]) {
-  if (signal(SIGCHLD, &sig_handler) == SIG_ERR) {
+  if (signal(SIGCHLD, &sigchld_handler) == SIG_ERR) {
+    exit(1);
+  }
+
+  if (signal(SIGINT, &sigint_handler) == SIG_ERR) {
     exit(1);
   }
 
