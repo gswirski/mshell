@@ -1,6 +1,6 @@
 mshell
 *.o
-test1/output/*
-test3/output/*
-test4/output/*
-test5/output/*
+*/output/*.err
+*/output/*.out
+*/output/*.serr
+*/output/*.sout

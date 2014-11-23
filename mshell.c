@@ -258,11 +258,12 @@ int main(int argc, char *argv[]) {
     pipeline *pipln = ln->pipelines;
     while (*pipln) {
       handle_pipeline(*pipln, ln->flags);
-      pipln++;
-    }
 
-    while (fgn) {
-      pause();
+      while (fgn) {
+        pause();
+      }
+
+      pipln++;
     }
   }
 
