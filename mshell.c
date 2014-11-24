@@ -21,7 +21,7 @@
 static struct stat stdin_stat;
 
 static volatile int fgn = 0;
-static volatile struct task_list running;
+static struct task_list running;
 
 void print_prompt() {
   if (S_ISCHR(stdin_stat.st_mode)) {
@@ -42,13 +42,17 @@ void print_exited_process(struct task *task) {
 }
 
 void print_exited_processes() {
-  struct task *task;
-  for (int i = 0; i < running.tasks; i++) {
-    task = &running.list[i];
-    if (task->status == 0) {
-      print_exited_process(task);
-      task_delete(&running, task);
-      i--;
+  struct task *task = running.head;
+  struct task *tmp;
+
+  while (task) {
+    tmp = task;
+    task = task->next;
+
+    if (tmp->status == 0) {
+      print_exited_process(tmp);
+      task_delete(&running, tmp);
+      free(tmp);
     }
   }
 }

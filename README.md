@@ -6,7 +6,7 @@ To do
 -----
 - [x] better error handling
 - [x] syntax error for `cmd | | cmd`
-- [ ] underlying `task_list` data structure
+- [x] underlying `task_list` data structure
 - [ ] `task_list` "locking" (disabling SIGCHLD)
 - [x] Ctrl-C support
 - [ ] testing on minix OS
