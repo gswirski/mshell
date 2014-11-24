@@ -4,6 +4,7 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <signal.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -20,6 +21,7 @@
 
 static struct stat stdin_stat;
 
+static sigset_t sigmask, sigoldmask;
 static volatile int fgn = 0;
 static struct task_list running;
 
@@ -226,6 +228,9 @@ int validate_line(line *ln) {
 }
 
 int main(int argc, char *argv[]) {
+  sigemptyset(&sigmask);
+  sigaddset(&sigmask, SIGCHLD);
+
   if (signal(SIGCHLD, &sigchld_handler) == SIG_ERR) {
     exit(1);
   }
@@ -263,9 +268,11 @@ int main(int argc, char *argv[]) {
     while (*pipln) {
       handle_pipeline(*pipln, ln->flags);
 
+      sigprocmask(SIG_BLOCK, &sigmask, &sigoldmask);
       while (fgn) {
-        pause();
+        sigsuspend(&sigoldmask);
       }
+      sigprocmask(SIG_UNBLOCK, &sigmask, NULL);
 
       pipln++;
     }
